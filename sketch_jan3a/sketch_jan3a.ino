@@ -8,7 +8,8 @@
 
   Libraries Used:
    - MFRC522 {RFID CARD}
-
+   - Adafruit Fingerprint Sensor {FingerPrint Scanner}
+   - ABM (URL's) for ESP32 CAM {https://dl.espressif.com/dl/package_esp32_index.json} || Arduino ESP32 Board
 */
 
 
