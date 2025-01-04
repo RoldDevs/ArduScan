@@ -14,6 +14,7 @@
    - IR Remote {IRremote} for infrared Remote Control
 */
 
+#include <IRremote.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
 #include <Adafruit_Fingerprint.h>
@@ -21,8 +22,10 @@
 // Constants
 #define buzzer 8
 #define RX_PIN 2 // Fingerprint sensor RX pin
-#define TX_PIN 3 // Fingerprint sensor TX pin
+#define TX_PIN 3 // Fingerprint sensor TX pin (Changed to avoid conflict with IR)
+#define IR_PIN 4 // IR Receiver pin
 #define MAX_ATTEMPTS 3
+#define OK_BUTTON_CODE 0xFFA25D // Replace with your remote's "OK" button code
 
 // LCD
 LiquidCrystal_I2C lcd(0x27, 16, 2);
@@ -30,26 +33,37 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 // Fingerprint sensor
 SoftwareSerial mySerial(RX_PIN, TX_PIN); 
 Adafruit_Fingerprint finger(&mySerial);
+IRrecv IR(IR_PIN); // IR Receiver
+decode_results results;
 
 void setup() {
+  Serial.begin(9600); // For debugging
+
+  // Remote setup
+  IR.enableIRIn();
+  Serial.println("IR Receiver Initialized");
+
   // Initialize LCD
   lcd.init();
   lcd.backlight();
   lcd.setCursor(0, 0);
   lcd.print("Initializing...");
+  Serial.println("Initializing LCD and Fingerprint Sensor...");
   
   // Initialize buzzer
   pinMode(buzzer, OUTPUT);
   noTone(buzzer);
 
   // Initialize fingerprint sensor
-  finger.begin(57600);
+  finger.begin(57600); // Default baud rate
   if (finger.verifyPassword()) {
     lcd.setCursor(0, 1);
     lcd.print("Fingerprint OK!");
+    Serial.println("Fingerprint sensor initialized successfully.");
   } else {
     lcd.setCursor(0, 1);
     lcd.print("Sensor Error!");
+    Serial.println("Error: Fingerprint sensor not detected.");
     while (true); // Halt execution if fingerprint sensor fails
   }
 
@@ -90,21 +104,50 @@ void loop() {
   lcd.clear();
   lcd.setCursor(0, 0);
   lcd.print("Failed Attempts!");
-  tone(buzzer, 4000); // Continuous beep for 5 seconds
-  delay(5000);
-  noTone(buzzer);
+
+  unsigned long startTime = millis();
+  tone(buzzer, 4000); // Continuous beep
+
+  // Check for remote signal while beeping
+  while (millis() - startTime < 5000) { // 5 seconds duration
+    if (IR.decode(&results)) {
+      if (results.value == OK_BUTTON_CODE) {
+        noTone(buzzer); // Stop the buzzer
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Buzzer Stopped");
+        delay(2000);
+        lcd.clear();
+        return;
+      }
+      IR.resume(); // Receive the next IR signal
+    }
+  }
+
+  noTone(buzzer); // Stop buzzer after 5 seconds
   lcd.clear();
 }
 
 int getFingerprintID() {
   int result = finger.getImage();
-  if (result != FINGERPRINT_OK) return -1;
+  if (result != FINGERPRINT_OK) {
+    Serial.println("Failed to get image.");
+    return -1;
+  }
 
   result = finger.image2Tz();
-  if (result != FINGERPRINT_OK) return -1;
+  if (result != FINGERPRINT_OK) {
+    Serial.println("Failed to convert image.");
+    return -1;
+  }
 
   result = finger.fingerSearch();
-  if (result != FINGERPRINT_OK) return -1;
+  if (result != FINGERPRINT_OK) {
+    Serial.println("No match found.");
+    return -1;
+  }
 
+  Serial.print("Fingerprint matched! ID: ");
+  Serial.println(finger.fingerID);
   return finger.fingerID;
 }
