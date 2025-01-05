@@ -1,19 +1,3 @@
-//MainProgrammer: Harold Edsel F. Cabaluna, Vergel O. Macayan
-//HardWare: Allan Hover Bonifacio
-//CodingMembers: Gabryelle T. Hermosa, Jonas H. Alberca
-
-/**
- BSCS - 4A [Valid Identification Scanner with Arduino]
- Project Name: ArduScan
-
-  Libraries Used:
-   - MFRC522 {RFID CARD}
-   - Adafruit Fingerprint Sensor {FingerPrint Scanner}
-   - LiquidCrystal_I2C.h {Display For Output}
-   - ABM (URL's) for ESP32 CAM {https://dl.espressif.com/dl/package_esp32_index.json} || Arduino ESP32 Board
-   - IR Remote {IRremote} for infrared Remote Control
-*/
-
 #include <IRremote.h>
 #include <Wire.h>
 #include <LiquidCrystal_I2C.h>
@@ -25,7 +9,11 @@
 #define TX_PIN 3 // Fingerprint sensor TX pin (Changed to avoid conflict with IR)
 #define IR_PIN 4 // IR Receiver pin
 #define MAX_ATTEMPTS 3
-#define OK_BUTTON_CODE 0xFFA25D // Replace with your remote's "OK" button code
+
+const int buttonPin = 9;
+int buttonState = 0;
+int lastButtonState = 0; // To track previous state
+bool systemActive = false; // To track if the system is active
 
 // LCD
 LiquidCrystal_I2C lcd(0x27, 16, 2);
@@ -36,34 +24,36 @@ Adafruit_Fingerprint finger(&mySerial);
 IRrecv IR(IR_PIN); // IR Receiver
 decode_results results;
 
+unsigned long timerStart = 0;  // Timer start time
+const unsigned long scanTimeout = 10000; // Timeout period (10 seconds)
+
 void setup() {
   Serial.begin(9600); // For debugging
 
   // Remote setup
   IR.enableIRIn();
-  Serial.println("IR Receiver Initialized");
 
   // Initialize LCD
   lcd.init();
   lcd.backlight();
   lcd.setCursor(0, 0);
-  lcd.print("Initializing...");
-  Serial.println("Initializing LCD and Fingerprint Sensor...");
+  lcd.print("Initializing.");
   
   // Initialize buzzer
   pinMode(buzzer, OUTPUT);
   noTone(buzzer);
 
+  // Initialize button pin
+  pinMode(buttonPin, INPUT); // Configure the button pin
+  
   // Initialize fingerprint sensor
   finger.begin(57600); // Default baud rate
   if (finger.verifyPassword()) {
     lcd.setCursor(0, 1);
-    lcd.print("Fingerprint OK!");
-    Serial.println("Fingerprint sensor initialized successfully.");
+    lcd.print("Fingerprint Ok");
   } else {
     lcd.setCursor(0, 1);
     lcd.print("Sensor Error!");
-    Serial.println("Error: Fingerprint sensor not detected.");
     while (true); // Halt execution if fingerprint sensor fails
   }
 
@@ -72,23 +62,60 @@ void setup() {
 }
 
 void loop() {
-  lcd.setCursor(0, 0);
-  lcd.print("Place your finger");
-  int attempts = 0;
+  buttonState = digitalRead(buttonPin);
+  
+  // If button state changes (pressed or released), toggle systemActive
+  if (buttonState == HIGH && lastButtonState == LOW) {
+    systemActive = !systemActive; // Toggle system active state
+    delay(200);  // Debounce delay
+  }
+  lastButtonState = buttonState;
 
-  while (attempts < MAX_ATTEMPTS) {
-    int result = getFingerprintID();
-    if (result == -1) {
-      // Fingerprint not recognized
+  if (systemActive) {
+    // If system is active, allow fingerprint scan
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Scan your finger");
+
+    if (timerStart == 0) {
+      // Start the timer when system is activated
+      timerStart = millis();
+    }
+
+    // If 10 seconds have passed, go back to "Choose option"
+    if (millis() - timerStart > scanTimeout) {
       lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("Please try again");
-      delay(2000);
-      lcd.clear();
-      lcd.setCursor(0, 0);
-      lcd.print("Place your finger");
-      attempts++;
+      lcd.setCursor(3, 0);
+      lcd.print("[ArduScan]              ");
+      timerStart = 0;  // Reset the timer
+      systemActive = false;  // Deactivate the system after timeout
     } else {
+      processFingerprintScan();
+    }
+  } else {
+    // If system is inactive, show "Choose option"
+    lcd.clear();   // Ensure the screen is cleared
+    lcd.setCursor(3, 0);
+    lcd.print("[ArduScan]                ");
+    lcd.backlight();  // Ensure backlight is on
+    timerStart = 0;  // Reset the timer
+  }
+}
+
+void processFingerprintScan() {
+  int result = getFingerprintID();
+  if (result == -1) {
+    // No fingerprint detected, remain in standby
+    return;
+  }
+
+  int attempts = 0;
+  while (attempts < MAX_ATTEMPTS) {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Processing.");
+
+    if (result != -1) {
       // Fingerprint recognized
       lcd.clear();
       lcd.setCursor(0, 0);
@@ -97,56 +124,27 @@ void loop() {
       delay(3000);
       lcd.clear();
       return;
-    }
+    } 
   }
-
-  // After 3 failed attempts
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Failed Attempts!");
-
-  unsigned long startTime = millis();
-  tone(buzzer, 4000); // Continuous beep
-
-  // Check for remote signal while beeping
-  while (millis() - startTime < 5000) { // 5 seconds duration
-    if (IR.decode(&results)) {
-      if (results.value == OK_BUTTON_CODE) {
-        noTone(buzzer); // Stop the buzzer
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("Buzzer Stopped");
-        delay(2000);
-        lcd.clear();
-        return;
-      }
-      IR.resume(); // Receive the next IR signal
-    }
-  }
-
-  noTone(buzzer); // Stop buzzer after 5 seconds
-  lcd.clear();
 }
 
 int getFingerprintID() {
   int result = finger.getImage();
   if (result != FINGERPRINT_OK) {
-    Serial.println("Failed to get image.");
-    return -1;
+    return -1; // No fingerprint detected
   }
 
   result = finger.image2Tz();
   if (result != FINGERPRINT_OK) {
-    Serial.println("Failed to convert image.");
-    return -1;
+    return -1; // Failed to process fingerprint
   }
 
   result = finger.fingerSearch();
   if (result != FINGERPRINT_OK) {
-    Serial.println("No match found.");
-    return -1;
+    return -1; // No match found
   }
 
+  // Fingerprint recognized
   Serial.print("Fingerprint matched! ID: ");
   Serial.println(finger.fingerID);
   return finger.fingerID;
