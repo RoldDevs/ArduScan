@@ -102,12 +102,15 @@ void processFingerprintScan() {
   delay(2000);  // Wait for 2 seconds to show "Verified."
   lcd.clear();  // Clear the screen after showing "Verified."
 
-  // Display only the fingerprint ID
-  lcd.setCursor(1, 0);
-  lcd.print("--[Welcome]--    ");
-  lcd.setCursor(2, 1);
-  lcd.print("UniqueID: ");
+  // Retrieve the name from EEPROM based on fingerprint ID
+  String name = getNameFromID(result);
+
+  lcd.setCursor(0, 0);
+  lcd.print("ID: ");
   lcd.print(result); // Display the fingerprint ID
+  lcd.setCursor(0, 1);
+  lcd.print("Name: ");
+  lcd.print(name);  // Display the name
 
   tone(buzzer, 1000, 300);
   delay(3000);
@@ -163,7 +166,7 @@ void enrollFingerprint() {
   delay(2000);
 
   lcd.clear();
-  lcd.print("Same Finger");
+  lcd.print("Place Same Finger");
 
   // Step 4: Wait for the same finger again
   while (finger.getImage() != FINGERPRINT_OK) {
@@ -196,10 +199,51 @@ void enrollFingerprint() {
     return;
   }
 
+  // Ask for the user's name
   lcd.clear();
-  lcd.print("Enroll Success!");
+  lcd.print("Name:");
+  String name = getNameFromUser();  // Read name from serial monitor
+
+  // Store fingerprint ID and name in EEPROM (max 20 characters for the name)
+  int eepromAddress = id * 20;  // Allocate 20 bytes per user
+  for (int i = 0; i < name.length(); i++) {
+    // Ensure only valid characters (ASCII values) are stored
+    if (name[i] >= 32 && name[i] <= 126) {
+      EEPROM.write(eepromAddress + i, name[i]);  // Store each valid character in EEPROM
+    } else {
+      EEPROM.write(eepromAddress + i, 0);  // Invalidate non-printable characters
+    }
+  }
+
+  // Clear remaining bytes (if the name is shorter than 20 characters)
+  for (int i = name.length(); i < 20; i++) {
+    EEPROM.write(eepromAddress + i, 0);  // Clear unused memory slots
+  }
+
+  lcd.print("Name Saved!");
   delay(2000);
   lcd.clear();
+}
+
+String getNameFromUser() {
+  String name = "";
+  while (Serial.available() == 0);  // Wait for input from Serial Monitor
+  name = Serial.readString();  // Read the name input from Serial Monitor
+  return name;
+}
+
+String getNameFromID(int id) {
+  String name = "";
+  int eepromAddress = id * 20; // The address where the name is stored
+
+  for (int i = 0; i < 20; i++) {
+    char c = EEPROM.read(eepromAddress + i);
+    // Ignore non-printable characters
+    if (c == 0 || (c < 32 || c > 126)) break;  // Stop at null or invalid character
+    name += c;  // Append character to the name
+  }
+  
+  return name;
 }
 
 int findAvailableID() {
