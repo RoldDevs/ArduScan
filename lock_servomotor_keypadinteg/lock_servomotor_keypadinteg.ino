@@ -31,7 +31,7 @@ String inputPassword = "";
 void setup() {
   // Initialize servo
   myServo.attach(servoPin);
-  myServo.write(120); // Lock position
+  myServo.write(150); // Lock position
 
   // Initialize LCD
   lcd.init();
@@ -55,10 +55,10 @@ void loop() {
 
         // Unlock the servo
         myServo.write(0);
-        delay(60000); // Keep unlocked for 5 seconds
+        delay(30000); // Keep unlocked for 30 seconds
 
         // Relock the servo
-        myServo.write(120);
+        myServo.write(150);
 
         lcd.clear();
         lcd.setCursor(0, 0);
